@@ -4,8 +4,15 @@
 
 #include "MasterController.h"
 #include  <winsock2.h>
+#include <Windows.h>
+#include <ws2tcpip.h>
 
-int const DEFAULT_BUFFLEN = 32;
+const int DEFAULT_BUFFLEN = 32;
+const PCSTR DEFUALT_PORT = "27015";
+
+
+
+#include <process.h>
 
 
 // Manage connection to clients. Listen to requests from clients for enqueueing tracks, skipping tracks,
@@ -14,12 +21,16 @@ class NetworkCommandModule
 {
 public:
 	NetworkCommandModule(MasterController * dump_commands_here);
-	void InitNetwork();
-	void DoListen();
+	int InitNetwork();
+	int DoListen();
 	~NetworkCommandModule();
+
+	int LinearTest();
 private:
 	// Give it a pointer to the MasterController object 
 	MasterController * m_master_controller_ptr;
+
+	bool m_kill_true;
 
 	// Buncha networking vars
     WSADATA m_wsaData;
@@ -27,8 +38,19 @@ private:
 	int m_network_send_result;
 	SOCKET m_listen_socket;
 	SOCKET m_client_socket;
-	char m_rec_buff[DEFAULT_BUFFLEN];
+
+	struct addrinfo *m_addr_info_result; 
+	struct addrinfo m_addr_info_hints;
+
+	
 	int m_rec_buff_len;
+	///////
+	int m_max_clients;
+	int m_num_clients;
+	////////
+	
+
+
 };
 
 #endif
