@@ -11,9 +11,11 @@ class MasterController
 public:
 	MasterController();
 	~MasterController();
-	bool QueueDJRequest( DJReqeust queue_this);
+	bool QueueDJRequest( DJRequest queue_this);
+	//HANDLE m_cmd_awknowledged_semaphore;
+
 private:
-	queue <DJReqeust> m_request_queue;
+	queue <DJRequest> m_request_queue;
 };
 
 

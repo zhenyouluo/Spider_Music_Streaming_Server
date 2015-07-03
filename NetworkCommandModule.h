@@ -3,6 +3,7 @@
 
 
 #include "MasterController.h"
+
 #include  <winsock2.h>
 #include <Windows.h>
 #include <ws2tcpip.h>
@@ -32,10 +33,14 @@ public:
 	HANDLE m_kill_semaphore;
 	HANDLE m_client_thread_id_index[MAX_CLIENTS];
 	bool m_client_thread_done_index[MAX_CLIENTS];
+	int m_client_thread_index;
+
+	MasterController * m_master_controller_ptr;
+
 	int m_num_clients;
 private:
 	// Give it a pointer to the MasterController object 
-	MasterController * m_master_controller_ptr;
+	
 
 	bool m_kill_true;
 

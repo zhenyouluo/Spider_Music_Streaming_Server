@@ -2,6 +2,7 @@
 
 
 DWORD WINAPI ServeClient(LPVOID lpParameter);
+DWORD WINAPI CleanOldConnections(LPVOID lpParameter);
 
 NetworkCommandModule::NetworkCommandModule(MasterController * dump_commands_here)
 {
@@ -23,7 +24,6 @@ NetworkCommandModule::~NetworkCommandModule()
 int NetworkCommandModule::InitNetwork()
 {
 	m_addr_info_result = NULL;
-	char m_rec_buff [DEFAULT_BUFFLEN];
 	m_rec_buff_len = DEFAULT_BUFFLEN; 
 
 	m_listen_socket = INVALID_SOCKET;
@@ -34,7 +34,10 @@ int NetworkCommandModule::InitNetwork()
 	for (int i = 0; i < MAX_CLIENTS; i++)
 	{
 		m_client_thread_done_index[i] = false;
+		m_client_thread_id_index[i] = NULL;
 	}
+	
+
 	m_network_result = WSAStartup(MAKEWORD(2,2), &m_wsaData);
 	if (m_network_result != 0)
 	{
@@ -88,7 +91,7 @@ int NetworkCommandModule::InitNetwork()
 	freeaddrinfo(m_addr_info_result);
 
 
-	
+	return 0;
 }
 
 
@@ -96,6 +99,9 @@ int NetworkCommandModule::InitNetwork()
 int NetworkCommandModule::DoListen()
 {
 	char deny_msg[12] = {"Denied"};
+	HANDLE temp_handle;
+	HANDLE cleanup_thread = CreateThread (NULL, 0, CleanOldConnections, (LPVOID) this, 0, NULL);
+
 	// Receive
 	do 
 	{
@@ -125,9 +131,21 @@ int NetworkCommandModule::DoListen()
 		// Spin up a new thread for our client
 		if (m_num_clients < MAX_CLIENTS)
 		{			
+			temp_handle = CreateThread (NULL, 0, ServeClient, (LPVOID) this, CREATE_SUSPENDED, NULL);
+			m_client_thread_index = 0;
+			for (int i = 0; i < MAX_CLIENTS; i++)
+			{
+				if (m_client_thread_id_index[i] == NULL) // if you find a blank space in the index.
+				{
+					m_client_thread_id_index[i] = temp_handle; // assign the handle there.
+					m_client_thread_index = i; // client thread will read this so it knows where to look later.
+					i = MAX_CLIENTS; // done looking.
+				}
+			}
+			// now start the thread, let it init.
+			ResumeThread( m_client_thread_id_index[m_client_thread_index]);
 			
-			m_client_thread_id_index[m_num_clients] = CreateThread (NULL, 0, ServeClient, (LPVOID) this, 0, NULL);
-			// Use a semaphore to ensure we don't change the client socket until the serverclient thread has read it.
+			// Use a semaphore to ensure we don't change the init data until the client thread has read it.
 				
 			// Block until the child thread is properly initilized.
 			WaitForSingleObject(m_init_semaphore, INFINITE);
@@ -146,19 +164,7 @@ int NetworkCommandModule::DoListen()
 			send(m_client_socket, deny_msg, (int)strlen(deny_msg), 0);
 		}
 
-		// Check to see if any of our client threads are done.
-		WaitForSingleObject(m_kill_semaphore, INFINITE);
-		for (int i = 0; i < MAX_CLIENTS; i++)
-		{
-			if (m_client_thread_done_index[i] == true)
-			{ // a certain client is done. 
-				CloseHandle(m_client_thread_id_index[i]);
-				m_client_thread_done_index[i] == false;
-			}
-
-		}
-		ReleaseSemaphore( m_kill_semaphore, 1, NULL);
-
+		
 
 	} while (m_kill_true == false);
 
@@ -175,10 +181,37 @@ int NetworkCommandModule::DoListen()
 		WSACleanup();
 		return 1;
 	}
+	return 0;
 }
 SOCKET NetworkCommandModule::GetCurClientSocket()
 {
 	return m_client_socket;
+}
+
+DWORD WINAPI CleanOldConnections(LPVOID lpParameter)
+{
+	NetworkCommandModule* ref_to_parent = (NetworkCommandModule*) lpParameter;
+	SOCKET internal_socket = ref_to_parent->GetCurClientSocket(); 
+	
+	while (1)
+	{
+		// Check to see if any of our client threads are done.
+		WaitForSingleObject(ref_to_parent->m_kill_semaphore, INFINITE);
+		for (int i = 0; i < MAX_CLIENTS; i++)
+		{
+			if (ref_to_parent->m_client_thread_done_index[i] == true)
+			{ // a certain client is done. 
+				CloseHandle(ref_to_parent->m_client_thread_id_index[i]);
+				ref_to_parent->m_client_thread_done_index[i] = false;
+				ref_to_parent->m_client_thread_id_index[i] = NULL;
+				ref_to_parent->m_num_clients--;      // Decouple num_clients and client index. 
+			}
+
+		}
+		ReleaseSemaphore( ref_to_parent->m_kill_semaphore, 1, NULL);
+
+	}
+	return 1;
 }
 
 DWORD WINAPI ServeClient(LPVOID lpParameter)
@@ -188,16 +221,15 @@ DWORD WINAPI ServeClient(LPVOID lpParameter)
 	NetworkCommandModule* ref_to_parent = (NetworkCommandModule*) lpParameter;
 	SOCKET internal_socket = ref_to_parent->GetCurClientSocket(); 
 
-	int this_threads_index = ref_to_parent->m_num_clients; 
+	int this_threads_index = ref_to_parent->m_client_thread_index; // Where in the index we live.  
 	int bytes_sent = 0;
 	int bytes_recieved = 0;
 	bool client_done = false;
 
-	char send_buf[64]="";
+	char send_buf[64]="A";
 	char rec_buf[64]="";
 
-	char timebuf[64];
-	ReleaseSemaphore( ref_to_parent->m_init_semaphore, 1, NULL);
+	ReleaseSemaphore( ref_to_parent->m_init_semaphore, 1, NULL); // Tell big daddy we are done init.
 
 
 	sprintf(send_buf, "Testing server connection.\n");
@@ -212,23 +244,35 @@ DWORD WINAPI ServeClient(LPVOID lpParameter)
 
 	while (client_done == false)
 	{
+		// Send bytes if we have something to send. 
+
 		ZeroMemory(rec_buf, sizeof(rec_buf));
-
-		bytes_recieved = recv(internal_socket, rec_buf, 32, 0);  // Look into timeout func. 
-
-
-
-		printf("Client said: %s\n", rec_buf);
-
-		if (strcmp(rec_buf, "kill") == 0)
+		bytes_recieved = recv(internal_socket, rec_buf, 32, MSG_PEEK);
+		if (bytes_recieved > 0)
 		{
-			client_done = true;
-		}
+			DJRequest req_for_you("yup", null_req, "no details");
+			bytes_recieved = recv(internal_socket, rec_buf, 32, 0);  // Look into timeout func. 
+			ref_to_parent->m_master_controller_ptr->QueueDJRequest(req_for_you); // Pass that information along.
 
-		if (rec_buf == NULL)
-		{
-			client_done = true;
+			// Wait for some kind of response.
+
+
+
+			send(internal_socket, send_buf, (int)strlen(send_buf), 0); // Send cmd_awk.
+
+			printf("Client said: %s\n", rec_buf);
+
+			if (strcmp(rec_buf, "kill") == 0)
+			{
+				client_done = true;
+			}
+
+			if (strcmp(rec_buf, "") == 0)
+			{
+				client_done = true;
+			}
 		}
+		
 
 	}
 
@@ -244,7 +288,6 @@ void NetworkCommandModule::ClientThreadDone(int index_of_thread_done)
 {
 	WaitForSingleObject(m_kill_semaphore, INFINITE);
 	m_client_thread_done_index[index_of_thread_done] = true;
-	m_num_clients--;
 	ReleaseSemaphore(m_kill_semaphore, 1, NULL);
 };
 
