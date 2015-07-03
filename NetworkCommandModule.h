@@ -9,8 +9,8 @@
 
 const int DEFAULT_BUFFLEN = 32;
 const PCSTR DEFUALT_PORT = "27015";
-
-
+//const int MAX_CLIENTS = 30;
+const int MAX_CLIENTS = 5;
 
 #include <process.h>
 
@@ -24,8 +24,15 @@ public:
 	int InitNetwork();
 	int DoListen();
 	~NetworkCommandModule();
+	SOCKET GetCurClientSocket(); 
+	void DecrNumClients();
+	void ClientThreadDone(int index_of_thread_done);
 
-	int LinearTest();
+	HANDLE m_init_semaphore;
+	HANDLE m_kill_semaphore;
+	HANDLE m_client_thread_id_index[MAX_CLIENTS];
+	bool m_client_thread_done_index[MAX_CLIENTS];
+	int m_num_clients;
 private:
 	// Give it a pointer to the MasterController object 
 	MasterController * m_master_controller_ptr;
@@ -38,19 +45,17 @@ private:
 	int m_network_send_result;
 	SOCKET m_listen_socket;
 	SOCKET m_client_socket;
-
 	struct addrinfo *m_addr_info_result; 
 	struct addrinfo m_addr_info_hints;
-
-	
 	int m_rec_buff_len;
 	///////
-	int m_max_clients;
-	int m_num_clients;
-	////////
 	
+	////////
+
 
 
 };
+
+
 
 #endif
