@@ -105,6 +105,10 @@ int NetworkCommandModule::DoListen()
 	// Receive
 	do 
 	{
+		////////
+		// Temporarily Force the master controller to handel requests.
+		m_master_controller_ptr->HandelRequests();
+		
 		// listen
 		m_network_result = listen(m_listen_socket, SOMAXCONN);
 		if (m_network_result == SOCKET_ERROR)
@@ -188,6 +192,11 @@ SOCKET NetworkCommandModule::GetCurClientSocket()
 	return m_client_socket;
 }
 
+
+
+/////////////////
+// Thread job whose only job is to clean up old client threads when
+// they signal that they are done. 
 DWORD WINAPI CleanOldConnections(LPVOID lpParameter)
 {
 	NetworkCommandModule* ref_to_parent = (NetworkCommandModule*) lpParameter;
@@ -214,6 +223,13 @@ DWORD WINAPI CleanOldConnections(LPVOID lpParameter)
 	return 1;
 }
 
+
+//////////////////////////////////////////////////////////////////////////////////
+// Thread function that manages communications with a single established client,
+// Checks with the master controller for information to send to the client.
+// Listens for packets from client, and dumps all packets recieved in 
+// a queue in MasterController for further processing.
+/////////////////////////////////////////////////////////////////////////////////
 DWORD WINAPI ServeClient(LPVOID lpParameter)
 {	
 	//ThreadMessage message_from_parent = (ThreadMessage) lpParameter;
@@ -226,14 +242,14 @@ DWORD WINAPI ServeClient(LPVOID lpParameter)
 	int bytes_recieved = 0;
 	bool client_done = false;
 
-	char send_buf[64]="A";
+	string send_buf= "A";
 	char rec_buf[64]="";
 
 	ReleaseSemaphore( ref_to_parent->m_init_semaphore, 1, NULL); // Tell big daddy we are done init.
 
 
-	sprintf(send_buf, "Testing server connection.\n");
-	bytes_sent = send( internal_socket, send_buf, strlen(send_buf), 0);
+	send_buf = "Testing server connection.\n";
+	bytes_sent = send( internal_socket, send_buf.data(), send_buf.size(), 0);
 
 	if (bytes_sent == SOCKET_ERROR)
 	{
@@ -244,21 +260,34 @@ DWORD WINAPI ServeClient(LPVOID lpParameter)
 
 	while (client_done == false)
 	{
-		// Send bytes if we have something to send. 
+		// Check to see if we have stuff to send.
+		if (ref_to_parent->m_master_controller_ptr->ClientChecksMail(this_threads_index) == true) 
+		{		
+			send_buf = ref_to_parent->m_master_controller_ptr->ClientReadsMail(this_threads_index);
+					// Send bytes if we have something to send. 
+			bytes_sent = send( internal_socket, send_buf.data(), send_buf.size(), 0);
+			if (bytes_sent == SOCKET_ERROR)
+			{
+				printf( "Could not send message.\n");
+				client_done = true;
+			}
+		}
+		
+
 
 		ZeroMemory(rec_buf, sizeof(rec_buf));
-		bytes_recieved = recv(internal_socket, rec_buf, 32, MSG_PEEK);
-		if (bytes_recieved > 0)
+		bytes_recieved = recv(internal_socket, rec_buf, 32, MSG_PEEK); // Peek for new messages.
+		if (bytes_recieved > 0) // If message. Processes. 
 		{
-			DJRequest req_for_you("yup", null_req, "no details");
+			DJRequest req_for_you(this_threads_index, null_req, "no details");
 			bytes_recieved = recv(internal_socket, rec_buf, 32, 0);  // Look into timeout func. 
 			ref_to_parent->m_master_controller_ptr->QueueDJRequest(req_for_you); // Pass that information along.
 
 			// Wait for some kind of response.
 
 
-
-			send(internal_socket, send_buf, (int)strlen(send_buf), 0); // Send cmd_awk.
+			send_buf = "A";
+			send(internal_socket, send_buf.data(),  send_buf.size(), 0); // Send cmd_awk.
 
 			printf("Client said: %s\n", rec_buf);
 
@@ -284,16 +313,13 @@ DWORD WINAPI ServeClient(LPVOID lpParameter)
 	return 1;
 }
 
+/////////////////////////////////////////////////////////////
+//Client thread runs this when it is done and client has disconnected. 
+//Signals the main threads that this thread is done and can be cleaned up.
+/////////////////////////////////////////////////////////
 void NetworkCommandModule::ClientThreadDone(int index_of_thread_done)
 {
 	WaitForSingleObject(m_kill_semaphore, INFINITE);
 	m_client_thread_done_index[index_of_thread_done] = true;
 	ReleaseSemaphore(m_kill_semaphore, 1, NULL);
 };
-
-void NetworkCommandModule::DecrNumClients()
-{
-	if (m_num_clients > 0)
-		 m_num_clients--;
-
-}

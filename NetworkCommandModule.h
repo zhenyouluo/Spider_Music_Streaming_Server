@@ -4,14 +4,7 @@
 
 #include "MasterController.h"
 
-#include  <winsock2.h>
-#include <Windows.h>
-#include <ws2tcpip.h>
 
-const int DEFAULT_BUFFLEN = 32;
-const PCSTR DEFUALT_PORT = "27015";
-//const int MAX_CLIENTS = 30;
-const int MAX_CLIENTS = 5;
 
 #include <process.h>
 
@@ -22,28 +15,29 @@ class NetworkCommandModule
 {
 public:
 	NetworkCommandModule(MasterController * dump_commands_here);
-	int InitNetwork();
-	int DoListen();
+	int DoListen();  // Call after the server is created.
 	~NetworkCommandModule();
 	SOCKET GetCurClientSocket(); 
-	void DecrNumClients();
 	void ClientThreadDone(int index_of_thread_done);
 
-	HANDLE m_init_semaphore;
-	HANDLE m_kill_semaphore;
-	HANDLE m_client_thread_id_index[MAX_CLIENTS];
-	bool m_client_thread_done_index[MAX_CLIENTS];
+
+	// Public so client threads we spin up have access.
+	HANDLE m_init_semaphore;  //When we spin up a client thread, the thread uses this semaphore
+	// to signal that it is done reading our data initializing.
+	HANDLE m_kill_semaphore; //Protects the flags that indicate when a client thread is done. 
+	HANDLE m_client_thread_id_index[MAX_CLIENTS]; // an array of currently running thread handels.
+	// Indexed by intigers 0-MAX_CLIENTS; 
+	bool m_client_thread_done_index[MAX_CLIENTS]; // a parrallel array of flags to indicate what client threads
+	// are done and need cleaning up now.
 	int m_client_thread_index;
+	int m_num_clients;
 
 	MasterController * m_master_controller_ptr;
 
-	int m_num_clients;
 private:
-	// Give it a pointer to the MasterController object 
-	
+	int InitNetwork(); // Called by CTOR
 
-	bool m_kill_true;
-
+	bool m_kill_true; // If set to true, server cleans up and shuts down.
 	// Buncha networking vars
     WSADATA m_wsaData;
 	int m_network_result;
